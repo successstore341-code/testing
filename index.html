@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem AI Deri Al Dzikri</title>
+    
+    <!-- Memanggil Library MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050811;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            color: #fff;
+        }
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #webcam {
+            display: none;
+        }
+        #output_canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Efek cermin */
+        }
+        
+        /* UI Overlay Keren / Sci-Fi HUD */
+        .hud-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            border: 4px solid rgba(0, 255, 242, 0.2);
+            pointer-events: none; /* Supaya tidak mengganggu klik */
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 25px;
+        }
+        
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(5, 8, 17, 0.7);
+            padding: 15px 20px;
+            border-radius: 8px;
+            border-left: 5px solid #00fff2;
+            backdrop-filter: blur(5px);
+        }
+
+        #status-text {
+            color: #00fff2;
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            animation: pulse 2s infinite;
+        }
+
+        #finger-count {
+            background: rgba(0, 255, 242, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 16px;
+            color: #00fff2;
+            border: 1px solid #00fff2;
+        }
+
+        /* Tombol aktivasi suara karena aturan browser */
+        #start-btn {
+            position: absolute;
+            z-index: 100;
+            padding: 15px 30px;
+            background: linear-gradient(45deg, #00fff2, #0077ff);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0, 255, 242, 0.5);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Tombol aktivasi awal untuk mengizinkan sistem suara browser -->
+    <button id="start-btn" onclick="aktifkanSistem()">AKTIFKAN AI SYSTEM</button>
+
+    <div class="container">
+        <div class="hud-overlay">
+            <div class="hud-header">
+                <div id="status-text">SISTEM INTEGRASI AWAL...</div>
+                <div id="finger-count">Jari: 0</div>
+            </div>
+        </div>
+        
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusText = document.getElementById('status-text');
+        const fingerCountText = document.getElementById('finger-count');
+        const startBtn = document.getElementById('start-btn');
+
+        let sistemSuaraSiap = false;
+        let sedangBicara = false;
+
+        // Fungsi Suara AI pembaca teks Bahasa Indonesia
+        function aiBicara(teks) {
+            // Cek jika browser mendukung suara dan AI sedang tidak berbicara saat ini
+            if ('speechSynthesis' in window && sistemSuaraSiap && !sedangBicara) {
+                sedangBicara = true;
+                const ucapan = new SpeechSynthesisUtterance(teks);
+                ucapan.lang = 'id-ID'; // Menggunakan aksen Bahasa Indonesia
+                ucapan.pitch = 1.0;    // Nada suara (1.0 = normal)
+                ucapan.rate = 0.95;     // Kecepatan robot berbicara
+
+                // Ketika AI selesai berbicara, kunci dibuka kembali
+                ucapan.onend = function() {
+                    // Beri jeda 3 detik sebelum boleh menyapa lagi agar tidak spam suara
+                    setTimeout(() => {
+                        sedangBicara = false;
+                    }, 3000);
+                };
+
+                window.speechSynthesis.speak(ucapan);
+            }
+        }
+
+        // Aturan Android/Browser mewajibkan interaksi user (klik tombol) sebelum suara bisa bunyi
+        function aktifkanSistem() {
+            sistemSuaraSiap = true;
+            startBtn.style.display = 'none'; // Sembunyikan tombol
+            
+            // Suara sambutan pertama kali diaktifkan
+            aiBicara("Sistem AI diaktifkan. Halo, silahkan lambaikan tangan Anda.");
+            
+            // Hidupkan Kamera HP
+            mulaiKamera();
+        }
+
+        // Fungsi hitung jari terbuka
+        function countFingers(landmarks) {
+            let fingers = [];
+            // 1. Jempol
+            if (landmarks[4].x < landmarks[3].x) fingers.push(1);
+            else fingers.push(0);
+
+            // 2. 4 Jari Lainnya
+            const tipIds = [8, 12, 16, 20];
+            for (let id of tipIds) {
+                if (landmarks[id].y < landmarks[id - 2].y) fingers.push(1);
+                else fingers.push(0);
+            }
+            return fingers.reduce((a, b) => a + b, 0);
+        }
+
+        function onResults(results) {
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            let totalFingers = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                totalFingers = countFingers(landmarks);
+
+                // Menggambar tulang tangan dengan warna Cyan Neon ala Sci-Fi
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00fff2', lineWidth: 3});
+                drawLandmarks(canvasCtx, landmarks, {color: '#ff0055', lineWidth: 1, radius: 4});
+            }
+
+            // --- LOGIKA UTAMA (BLUR & SUARA AI) ---
+            if (totalFingers === 5) {
+                // Efek Blur Kamera
+                canvasCtx.filter = 'blur(30px)';
+                canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+                canvasCtx.filter = 'none';
+                
+                // Gambar ulang kerangka neon di atas blur
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    drawConnectors(canvasCtx, results.multiHandLandmarks[0], HAND_CONNECTIONS, {color: '#00fff2', lineWidth: 3});
+                    drawLandmarks(canvasCtx, results.multiHandLandmarks[0], {color: '#ff0055', lineWidth: 1, radius: 4});
+                }
+
+                statusText.innerText = "SISTEM BLUR AKTIF";
+                statusText.style.color = "#ff0055";
+                fingerCountText.innerText = "Jari: 5 (Melambaikan Tangan)";
+
+                // Pemicu Suara AI Perkenalan Nama Kamu saat melambaikan 5 jari
+                aiBicara("Perkenalkan, nama saya Deri Al Dzikri. Salam kenal!");
+
+            } else {
+                statusText.innerText = "MEMINDAI GERAKAN...";
+                statusText.style.color = "#00fff2";
+                fingerCountText.innerText = `Jari: ${totalFingers}`;
+            }
+
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onResults);
+
+        function mulaiKamera() {
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+    </script>
+</body>
+</html>
